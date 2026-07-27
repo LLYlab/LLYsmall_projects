@@ -1,0 +1,780 @@
+import pygame
+import sys
+import random
+import math
+
+pygame.init()
+
+SCREEN_WIDTH = 1000
+SCREEN_HEIGHT = 1000
+NONE_FLY_ZONE = 120
+
+WHITE = (255, 255, 255)
+GREEN = (0, 200, 0)
+RED = (255, 0, 0)
+BLUE = (0, 0, 255)
+YELLOW = (255, 255, 0)
+INDICATOR_COLOR = (0, 0, 0)
+
+screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+pygame.display.set_caption("Air Defense")
+
+try:
+    font = pygame.font.SysFont('simhei', 20)
+except:
+    font = pygame.font.Font(None, 24)
+
+TYPE_NAMES_CN = {
+    'standard': '标准战斗机',
+    'speedy': '高速战斗机',
+    'heavy': '重型战斗机',
+    'attacker': '攻击机',
+    'bomber': '轰炸机',
+    'dogfighter': '狗斗机',
+    'jet': '德国喷气',
+    'missile_plane': '导弹飞机',
+    'attacker_rear': '攻击机改'
+}
+
+TYPE_KEYS = [
+    'standard', 'speedy', 'heavy', 'attacker', 'bomber', 'dogfighter',
+    'jet', 'missile_plane', 'attacker_rear'
+]
+selected_type_index = 0
+
+class CenterTarget:
+    def __init__(self):
+        self.x = SCREEN_WIDTH // 2
+        self.y = SCREEN_HEIGHT // 2
+        self.alive = True
+center_target = CenterTarget()
+
+AIRCRAFT_TYPES = {
+    'standard': {
+        'speed': 2, 'max_hp': 100, 'turn_rate': 2,
+        'attack_range': 100, 'attack_dmg': 10,
+        'attack_angle': 5, 'ground_dmg': 0.05, 'ground_radius': 15,
+        'size': 7, 'color': RED, 'shape': 'triangle', 'role': 'fighter',
+        'bullet_type': 'small', 'attack_cooldown': 5
+    },
+    'speedy': {
+        'speed': 4, 'max_hp': 60, 'turn_rate': 1,
+        'attack_range': 80, 'attack_dmg': 8,
+        'attack_angle': 5, 'ground_dmg': 0.03, 'ground_radius': 10,
+        'size': 5, 'color': (255, 100, 100), 'shape': 'narrow', 'role': 'fighter',
+        'bullet_type': 'small', 'attack_cooldown': 5
+    },
+    'heavy': {
+        'speed': 2.5, 'max_hp': 200, 'turn_rate': 1,
+        'attack_range': 150, 'attack_dmg': 60,
+        'attack_angle': 5, 'ground_dmg': 0.1, 'ground_radius': 20,
+        'size': 10, 'color': (200, 0, 0), 'shape': 'triangle', 'role': 'fighter',
+        'bullet_type': 'large', 'attack_cooldown': 20,
+        'has_secondary': True, 'secondary_dmg': 5, 'secondary_cooldown': 5
+    },
+    'attacker': {
+        'speed': 1.5, 'max_hp': 150, 'turn_rate': 1,
+        'attack_range': 120, 'attack_dmg': 80,
+        'attack_angle': 5, 'ground_dmg': 0.5, 'ground_radius': 30,
+        'size': 11, 'color': (60, 0, 0), 'shape': 'triangle', 'role': 'attacker',
+        'bullet_type': 'large', 'attack_cooldown': 20
+    },
+    'bomber': {
+        'speed': 1.5, 'max_hp': 300, 'turn_rate': 0.5,
+        'attack_range': 60, 'attack_dmg': 20,
+        'attack_angle': 15, 'ground_dmg': 3, 'ground_radius': 80,
+        'size': 9, 'color': (150, 0, 0), 'shape': 'wide_triangle', 'role': 'bomber',
+        'bullet_type': 'large', 'attack_cooldown': 20
+    },
+    'dogfighter': {
+        'speed': 1.8, 'max_hp': 80, 'turn_rate': 5,
+        'attack_range': 90, 'attack_dmg': 8,
+        'attack_angle': 5, 'ground_dmg': 0.02, 'ground_radius': 10,
+        'size': 6, 'color': (255, 80, 80), 'shape': 'small_triangle', 'role': 'fighter',
+        'bullet_type': 'small', 'attack_cooldown': 5
+    },
+    'jet': {
+        'speed': 5.5, 'max_hp': 80, 'turn_rate': 0.8,          # 速度降低
+        'attack_range': 100, 'attack_dmg': 10,
+        'attack_angle': 5, 'ground_dmg': 0.03, 'ground_radius': 10,
+        'size': 6, 'color': (192, 192, 192), 'shape': 'narrow', 'role': 'fighter',
+        'bullet_type': 'small', 'attack_cooldown': 5
+    },
+    'missile_plane': {
+        'speed': 2.5, 'max_hp': 120, 'turn_rate': 2,
+        'attack_range': 350, 'attack_dmg': 0,
+        'attack_angle': 30, 'ground_dmg': 0, 'ground_radius': 0,
+        'size': 9, 'color': (0, 0, 255), 'shape': 'triangle', 'role': 'fighter',
+        'weapon_type': 'missile', 'attack_cooldown': 50
+    },
+    'attacker_rear': {
+        'speed': 1.5, 'max_hp': 150, 'turn_rate': 1,
+        'attack_range': 120, 'attack_dmg': 40,
+        'attack_angle': 180, 'ground_dmg': 0.5, 'ground_radius': 30,
+        'size': 11, 'color': (0, 100, 0), 'shape': 'triangle', 'role': 'attacker',
+        'bullet_type': 'large', 'attack_cooldown': 10
+    }
+}
+
+class Base:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+        self.hp = 1000
+        self.max_hp = 1000
+        self.alive = True
+
+    def draw(self):
+        if not self.alive:
+            return
+        rect = pygame.Rect(self.x - 15, self.y - 15, 30, 30)
+        pygame.draw.rect(screen, GREEN, rect)
+        bar_w = 30
+        pygame.draw.rect(screen, RED, (self.x - bar_w//2, self.y - 20, bar_w, 4))
+        pygame.draw.rect(screen, (0, 255, 0), (self.x - bar_w//2, self.y - 20,
+                                               bar_w * (self.hp / self.max_hp), 4))
+
+class Bullet:
+    def __init__(self, x, y, angle, speed, damage, team):
+        self.x = x
+        self.y = y
+        self.angle = angle
+        self.speed = speed
+        self.damage = damage
+        self.team = team
+        self.alive = True
+        self.angle += random.uniform(-2, 2)
+
+    def update(self, enemies):
+        if not self.alive:
+            return
+        rad = math.radians(self.angle)
+        self.x += self.speed * math.cos(rad)
+        self.y += self.speed * math.sin(rad)
+        if (self.x < 0 or self.x > SCREEN_WIDTH or self.y < 0 or self.y > SCREEN_HEIGHT):
+            self.alive = False
+            return
+        for e in enemies:
+            if not e.alive:
+                continue
+            dist = math.hypot(e.x - self.x, e.y - self.y)
+            if dist < e.size + 3:
+                if e.team != self.team:
+                    dodge = min(0.5, e.speed * 0.1)
+                    if random.random() > dodge:
+                        e.hp -= self.damage
+                        if e.hp <= 0:
+                            e.alive = False
+                    self.alive = False
+                    break
+                else:
+                    if random.random() < 0.2:
+                        e.hp -= self.damage
+                        if e.hp <= 0:
+                            e.alive = False
+                        self.alive = False
+                        break
+
+    def draw(self):
+        if not self.alive:
+            return
+        pygame.draw.circle(screen, (0,0,0), (int(self.x), int(self.y)), 2)
+
+class Missile:
+    def __init__(self, x, y, angle, speed=7, turn_rate=10, max_range=420, damage=100):
+        self.x = x
+        self.y = y
+        self.angle = angle
+        self.speed = speed
+        self.turn_rate = turn_rate
+        self.max_range = max_range
+        self.damage = damage
+        self.traveled = 0
+        self.alive = True
+        self.target = None          # 当前锁定的飞机
+
+    def find_ir_target(self, all_aircraft):
+        """实时红外目标选择：前方±30度、400距离内，优先屁股朝向自己"""
+        best_score = float('inf')
+        best_target = None
+        for e in all_aircraft:
+            if not e.alive:
+                continue
+            dx = e.x - self.x
+            dy = e.y - self.y
+            dist = math.hypot(dx, dy)
+            if dist > 400 or dist < 1:
+                continue
+            # 导引头视场检查：目标必须在导弹当前朝向±30度内
+            angle_to = math.degrees(math.atan2(dy, dx))
+            diff = abs((angle_to - self.angle + 540) % 360 - 180)
+            if diff > 30:
+                continue
+            # 机尾热源：目标飞行方向指向本导弹（点积越大越好）
+            e_rad = math.radians(e.angle)
+            ex = math.cos(e_rad)
+            ey = math.sin(e_rad)
+            to_self_x = -dx / dist
+            to_self_y = -dy / dist
+            tail_aspect = ex * to_self_x + ey * to_self_y   # [-1, 1]，1表示正对尾喷口
+            # 评分：越高越好（取负值以便最小化）
+            score = -tail_aspect * 1000 + dist * 0.1
+            if score < best_score:
+                best_score = score
+                best_target = e
+        return best_target
+
+    def update(self, all_aircraft):
+        if not self.alive:
+            return
+
+        # 每帧重新搜索最佳目标
+        new_target = self.find_ir_target(all_aircraft)
+        if new_target:
+            self.target = new_target
+
+        # 追踪目标或直线飞行
+        if self.target and self.target.alive:
+            target_angle = math.degrees(math.atan2(self.target.y - self.y,
+                                                   self.target.x - self.x))
+            diff = (target_angle - self.angle + 540) % 360 - 180
+            if diff > self.turn_rate:
+                self.angle += self.turn_rate
+            elif diff < -self.turn_rate:
+                self.angle -= self.turn_rate
+            else:
+                self.angle = target_angle
+        # 否则保持当前角度
+
+        rad = math.radians(self.angle)
+        dx = self.speed * math.cos(rad)
+        dy = self.speed * math.sin(rad)
+        self.x += dx
+        self.y += dy
+        self.traveled += math.hypot(dx, dy)
+
+        # 命中判定：对任何飞机，若距离<10则造成伤害并消失
+        for e in all_aircraft:
+            if not e.alive:
+                continue
+            if math.hypot(e.x - self.x, e.y - self.y) < 10:
+                e.hp -= self.damage
+                self.alive = False
+                if e.hp <= 0:
+                    e.alive = False
+                return
+
+        # 射程限制
+        if self.traveled >= self.max_range:
+            self.alive = False
+
+    def draw(self):
+        if not self.alive:
+            return
+        s = 4
+        local = [(s*1.5, 0), (-s*1.5, -s), (-s*1.5, s)]
+        rad = math.radians(self.angle)
+        cos_a = math.cos(rad)
+        sin_a = math.sin(rad)
+        world = []
+        for lx, ly in local:
+            wx = lx * cos_a - ly * sin_a
+            wy = lx * sin_a + ly * cos_a
+            world.append((self.x + wx, self.y + wy))
+        pygame.draw.polygon(screen, YELLOW, world)
+
+class AATower:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+        self.hp = 200
+        self.max_hp = 200
+        self.alive = True
+        self.range = 150
+        self.damage = 50
+        self.cooldown = 0
+        self.cooldown_time = 120
+        self.msl_direction = random.uniform(0, 360)
+        self.turn_rate = 2
+        self.missiles = []
+        self.clip = 2
+        self.reload_time = 10
+
+    def update(self, enemies):
+        if not self.alive:
+            return
+        if self.cooldown > 0:
+            self.cooldown -= 1
+        if self.clip == 0 and self.cooldown == 0:
+            self.clip = 2
+            self.cooldown = self.cooldown_time
+
+        target = None
+        min_dist = float('inf')
+        for e in enemies:
+            if not e.alive or e.team != 'enemy':
+                continue
+            dist = math.hypot(e.x - self.x, e.y - self.y)
+            if dist < self.range and dist < min_dist:
+                min_dist = dist
+                target = e
+        if target:
+            target_angle = math.degrees(math.atan2(target.y - self.y, target.x - self.x))
+            diff = (target_angle - self.msl_direction + 540) % 360 - 180
+            if diff > self.turn_rate:
+                self.msl_direction += self.turn_rate
+            elif diff < -self.turn_rate:
+                self.msl_direction -= self.turn_rate
+            else:
+                self.msl_direction = target_angle
+            if self.clip > 0 and self.cooldown == 0 and abs(diff) < 15:
+                # 防空导弹依然使用简化版（直接跟踪目标，不主动重选，但会命中任何飞机）
+                self.missiles.append(Missile(self.x, self.y, self.msl_direction))
+                self.clip -= 1
+                if self.clip > 0:
+                    self.cooldown = self.reload_time
+                else:
+                    self.cooldown = self.cooldown_time
+        for m in self.missiles[:]:
+            m.update(enemies)       # 防空导弹也传入飞机列表
+            if not m.alive:
+                self.missiles.remove(m)
+
+    def draw(self):
+        if not self.alive:
+            return
+        range_surf = pygame.Surface((self.range*2, self.range*2), pygame.SRCALPHA)
+        pygame.draw.circle(range_surf, (0, 255, 0, 30), (self.range, self.range), self.range)
+        screen.blit(range_surf, (self.x - self.range, self.y - self.range))
+        rect = pygame.Rect(self.x - 8, self.y - 8, 16, 16)
+        pygame.draw.rect(screen, GREEN, rect)
+        rad = math.radians(self.msl_direction)
+        end_x = self.x + 12 * math.cos(rad)
+        end_y = self.y + 12 * math.sin(rad)
+        pygame.draw.line(screen, (0,0,0), (self.x, self.y), (end_x, end_y), 2)
+        bar_w = 16
+        pygame.draw.rect(screen, RED, (self.x - bar_w//2, self.y - 15, bar_w, 3))
+        pygame.draw.rect(screen, (0, 255, 0), (self.x - bar_w//2, self.y - 15,
+                                               bar_w * (self.hp / self.max_hp), 3))
+        for m in self.missiles:
+            m.draw()
+
+class Aircraft:
+    def __init__(self, x, y, angle, type_key='standard', team='enemy', color_override=None):
+        cfg = AIRCRAFT_TYPES[type_key]
+        self.type = type_key
+        self.role = cfg.get('role', 'fighter')
+        self.team = team
+        self.x = x
+        self.y = y
+        self.angle = angle
+        self.speed = cfg['speed']
+        self.max_hp = cfg['max_hp']
+        self.hp = self.max_hp
+        self.turn_rate = cfg['turn_rate']
+        self.attack_range = cfg['attack_range']
+        self.attack_dmg = cfg['attack_dmg']
+        self.attack_angle = cfg['attack_angle']
+        self.ground_dmg = cfg['ground_dmg']
+        self.ground_radius = cfg['ground_radius']
+        self.size = cfg['size']
+        self.color = color_override if color_override else cfg['color']
+        self.shape = cfg['shape']
+        self.weapon_type = cfg.get('weapon_type', 'bullet')
+        self.bullet_type = cfg.get('bullet_type', 'small')
+        self.attack_cooldown_time = cfg.get('attack_cooldown', 10)
+        self.has_secondary = cfg.get('has_secondary', False)
+        self.secondary_dmg = cfg.get('secondary_dmg', 0)
+        self.secondary_cooldown = cfg.get('secondary_cooldown', 0)
+        self.secondary_cd = 0
+        self.alive = True
+        self.nav_target = None
+        self.last_attack_time = 0
+        self.in_boundary = False
+        self.attack_cooldown = 0
+
+    def draw(self):
+        if not self.alive:
+            return
+        s = self.size
+        if self.shape == 'narrow':
+            local = [(s*1.2, 0), (-s*0.6, -s*0.6), (-s*0.3, 0), (-s*0.6, s*0.6)]
+        elif self.shape == 'wide_triangle':
+            local = [(s*1.0, 0), (-s*0.8, -s*1.2), (-s*0.8, s*1.2)]
+        elif self.shape == 'small_triangle':
+            local = [(s*0.9, 0), (-s*0.5, -s*0.5), (-s*0.5, s*0.5)]
+        elif self.shape == 'triangle':
+            local = [(s*0.7, 0), (-s*0.7, -s*0.7), (-s*0.7, s*0.7)]
+        else:
+            local = [(s*0.7, 0), (0, -s*0.7), (-s*0.7, 0), (0, s*0.7)]
+        rad = math.radians(self.angle)
+        cos_a = math.cos(rad)
+        sin_a = math.sin(rad)
+        world = []
+        for lx, ly in local:
+            wx = lx * cos_a - ly * sin_a
+            wy = lx * sin_a + ly * cos_a
+            world.append((self.x + wx, self.y + wy))
+        if self.shape == 'hollow_triangle':
+            pygame.draw.polygon(screen, self.color, world, width=2)
+        else:
+            pygame.draw.polygon(screen, self.color, world)
+        bar_w = self.size + 2
+        pygame.draw.rect(screen, RED, (self.x - bar_w/2, self.y - self.size - 8, bar_w, 4))
+        pygame.draw.rect(screen, (0, 255, 0), (self.x - bar_w/2, self.y - self.size - 8,
+                                               bar_w * (self.hp / self.max_hp), 4))
+
+    def draw_indicator(self):
+        if not self.alive or not self.nav_target:
+            return
+        start_x, start_y = self.x, self.y
+        end_x, end_y = self.nav_target.x, self.nav_target.y
+        pygame.draw.line(screen, INDICATOR_COLOR, (start_x, start_y), (end_x, end_y), 1)
+        angle_to = math.atan2(end_y - start_y, end_x - start_x)
+        arrow_len = 8
+        arrow_angle = 0.4
+        left = angle_to + math.pi - arrow_angle
+        right = angle_to + math.pi + arrow_angle
+        p1 = (end_x + arrow_len * math.cos(left), end_y + arrow_len * math.sin(left))
+        p2 = (end_x, end_y)
+        p3 = (end_x + arrow_len * math.cos(right), end_y + arrow_len * math.sin(right))
+        pygame.draw.polygon(screen, INDICATOR_COLOR, [p1, p2, p3])
+
+    def update(self, enemies, base, towers, bullets, missiles, all_aircraft):
+        if not self.alive:
+            return
+
+        self.in_boundary = (self.x < NONE_FLY_ZONE or self.x > SCREEN_WIDTH - NONE_FLY_ZONE or
+                            self.y < NONE_FLY_ZONE or self.y > SCREEN_HEIGHT - NONE_FLY_ZONE)
+
+        air_targets = [e for e in enemies if e.alive and e.team != self.team]
+        ground_targets = []
+        if self.team == 'enemy':
+            if base.alive:
+                ground_targets.append(base)
+            for t in towers:
+                if t.alive:
+                    ground_targets.append(t)
+
+        if self.attack_cooldown > 0:
+            self.attack_cooldown -= 1
+        if self.secondary_cd > 0:
+            self.secondary_cd -= 1
+
+        if self.in_boundary:
+            self.nav_target = center_target
+        else:
+            if self.nav_target is center_target:
+                self.nav_target = None
+            now = pygame.time.get_ticks()
+            if self.role == 'fighter':
+                candidates = air_targets if air_targets else ground_targets
+            elif self.role == 'attacker':
+                candidates = air_targets + ground_targets
+            elif self.role == 'bomber':
+                if ground_targets:
+                    self.nav_target = min(ground_targets, key=lambda t: math.hypot(t.x - self.x, t.y - self.y))
+                else:
+                    candidates = air_targets
+            else:
+                candidates = air_targets + ground_targets
+
+            if self.role != 'bomber' or not ground_targets:
+                if self.nav_target and self.nav_target.alive and self.nav_target in candidates:
+                    if now - self.last_attack_time > 3000:
+                        self.nav_target = None
+                else:
+                    self.nav_target = None
+                if not self.nav_target and candidates:
+                    def score(t):
+                        angle_to = math.degrees(math.atan2(t.y - self.y, t.x - self.x))
+                        angle_diff = abs((angle_to - self.angle + 540) % 360 - 180)
+                        dist = math.hypot(t.x - self.x, t.y - self.y)
+                        return angle_diff * 100 - dist
+                    self.nav_target = min(candidates, key=score)
+
+        if self.in_boundary:
+            target_angle = math.degrees(math.atan2(SCREEN_HEIGHT//2 - self.y,
+                                                   SCREEN_WIDTH//2 - self.x))
+        elif self.nav_target:
+            target_angle = math.degrees(math.atan2(self.nav_target.y - self.y,
+                                                   self.nav_target.x - self.x))
+        else:
+            center_angle = math.degrees(math.atan2(SCREEN_HEIGHT//2 - self.y,
+                                                   SCREEN_WIDTH//2 - self.x))
+            diff = (center_angle - self.angle + 540) % 360 - 180
+            if diff == -180: diff = 180
+            if diff > 0:
+                target_angle = self.angle + min(diff, self.turn_rate * 0.2)
+            else:
+                target_angle = self.angle + max(diff, -self.turn_rate * 0.2)
+
+        if target_angle is not None:
+            diff = (target_angle - self.angle + 540) % 360 - 180
+            if diff == -180: diff = 180
+            if diff > self.turn_rate:
+                self.angle += self.turn_rate
+            elif diff < -self.turn_rate:
+                self.angle -= self.turn_rate
+            else:
+                self.angle += diff
+
+        rad = math.radians(self.angle)
+        self.x += self.speed * math.cos(rad)
+        self.y += self.speed * math.sin(rad)
+
+        if self.in_boundary:
+            return
+
+        now = pygame.time.get_ticks()
+
+        # 导弹飞机发射
+        if self.weapon_type == 'missile':
+            if self.attack_cooldown == 0:
+                missile_target = self.select_ir_target(air_targets)   # 只搜索敌方
+                if missile_target:
+                    missiles.append(Missile(self.x, self.y, self.angle))
+                    self.attack_cooldown = self.attack_cooldown_time
+                    self.last_attack_time = now
+        else:
+            if self.nav_target and self.nav_target.alive and isinstance(self.nav_target, Aircraft):
+                dist = math.hypot(self.nav_target.x - self.x, self.nav_target.y - self.y)
+                angle_to = math.degrees(math.atan2(self.nav_target.y - self.y,
+                                                   self.nav_target.x - self.x))
+                diff = abs((angle_to - self.angle + 540) % 360 - 180)
+                if self.attack_angle >= 180:
+                    can_attack = dist < self.attack_range
+                else:
+                    can_attack = dist < self.attack_range and diff <= self.attack_angle
+
+                if can_attack and self.attack_cooldown == 0:
+                    bullet_speed = self.speed + 6
+                    t = dist / bullet_speed
+                    target_rad = math.radians(self.nav_target.angle)
+                    pred_x = self.nav_target.x + self.nav_target.speed * math.cos(target_rad) * t
+                    pred_y = self.nav_target.y + self.nav_target.speed * math.sin(target_rad) * t
+                    aim_angle = math.degrees(math.atan2(pred_y - self.y, pred_x - self.x))
+                    bullets.append(Bullet(self.x, self.y, aim_angle,
+                                          speed=bullet_speed, damage=self.attack_dmg, team=self.team))
+                    self.attack_cooldown = self.attack_cooldown_time
+                    self.last_attack_time = now
+
+                if self.has_secondary and can_attack and self.secondary_cd == 0:
+                    bullet_speed = self.speed + 6
+                    t = dist / bullet_speed
+                    target_rad = math.radians(self.nav_target.angle)
+                    pred_x = self.nav_target.x + self.nav_target.speed * math.cos(target_rad) * t
+                    pred_y = self.nav_target.y + self.nav_target.speed * math.sin(target_rad) * t
+                    aim_angle = math.degrees(math.atan2(pred_y - self.y, pred_x - self.x))
+                    bullets.append(Bullet(self.x, self.y, aim_angle,
+                                          speed=bullet_speed, damage=self.secondary_dmg, team=self.team))
+                    self.secondary_cd = self.secondary_cooldown
+
+        # 地面攻击
+        if self.team == 'enemy':
+            if self.type == 'bomber':
+                for g in ground_targets:
+                    if not g.alive: continue
+                    dist = math.hypot(g.x - self.x, g.y - self.y)
+                    angle_to = math.degrees(math.atan2(g.y - self.y, g.x - self.x))
+                    diff = abs((angle_to - self.angle + 540) % 360 - 180)
+                    if dist <= self.ground_radius and diff <= self.attack_angle:
+                        g.hp -= self.ground_dmg
+                        self.last_attack_time = now
+                        if g.hp <= 0:
+                            g.alive = False
+            else:
+                if self.ground_dmg > 0:
+                    for g in ground_targets:
+                        if not g.alive: continue
+                        dist = math.hypot(g.x - self.x, g.y - self.y)
+                        angle_to = math.degrees(math.atan2(g.y - self.y, g.x - self.x))
+                        diff = abs((angle_to - self.angle + 540) % 360 - 180)
+                        if dist < self.attack_range and diff <= self.attack_angle:
+                            g.hp -= self.ground_dmg
+                            self.last_attack_time = now
+                            if g.hp <= 0:
+                                g.alive = False
+
+    def select_ir_target(self, air_targets):
+        """红外目标选择（发射前调用，仅敌方）"""
+        if not air_targets:
+            return None
+        scored = []
+        for e in air_targets:
+            dx = e.x - self.x
+            dy = e.y - self.y
+            dist = math.hypot(dx, dy)
+            if dist > self.attack_range:
+                continue
+            e_rad = math.radians(e.angle)
+            ex = math.cos(e_rad)
+            ey = math.sin(e_rad)
+            to_self_x = -dx / dist
+            to_self_y = -dy / dist
+            tail_aspect = ex * to_self_x + ey * to_self_y
+            self_rad = math.radians(self.angle)
+            sx = math.cos(self_rad)
+            sy = math.sin(self_rad)
+            angle_diff = math.acos(max(-1, min(1, sx * (dx/dist) + sy * (dy/dist))))
+            score = -tail_aspect * 1000 + angle_diff * 100 + dist * 0.1
+            scored.append((score, e))
+        if not scored:
+            return None
+        scored.sort(key=lambda x: x[0])
+        return scored[0][1]
+
+class WaveManager:
+    def __init__(self, wave_data):
+        self.waves = wave_data
+        self.current_wave_index = -1
+        self.state = 'idle'
+        self.wait_timer = 0
+        self.wait_target = 0
+        self.last_wave_alive = True
+
+    def update(self, enemies):
+        if self.current_wave_index >= 0:
+            wave_enemies = [e for e in enemies if e.alive and e.team == 'enemy']
+            self.last_wave_alive = len(wave_enemies) > 0
+        if self.state == 'idle':
+            if self.current_wave_index + 1 < len(self.waves):
+                self.current_wave_index += 1
+                self.trigger_wave()
+        elif self.state == 'waiting':
+            self.wait_timer += 1
+            if self.wait_timer >= self.wait_target:
+                self.spawn_wave(enemies)
+
+    def trigger_wave(self):
+        wave = self.waves[self.current_wave_index]
+        t_type, t_value = wave['trigger']['type'], wave['trigger']['value'] * 60
+        if t_type == '前队毁灭':
+            if not self.last_wave_alive or self.current_wave_index == 0:
+                self.wait_timer = 0; self.wait_target = t_value; self.state = 'waiting'
+            else:
+                self.state = 'idle'
+        elif t_type == '前队部署':
+            self.wait_timer = 0; self.wait_target = t_value; self.state = 'waiting'
+        elif t_type == '前队毁灭或等待':
+            self.wait_timer = 0; self.wait_target = t_value; self.state = 'waiting'
+
+    def spawn_wave(self, enemies):
+        wave = self.waves[self.current_wave_index]
+        for m in wave['members']:
+            enemies.append(Aircraft(m['pos'][0], m['pos'][1], m['angle'], m['type'], team='enemy'))
+        self.state = 'idle'
+
+anemy_r = [
+    {'trigger': {'type': '前队部署', 'value': 2},
+     'members': [{'type': 'standard', 'pos': (100, 100), 'angle': 45},
+                 {'type': 'standard', 'pos': (900, 100), 'angle': 135}]},
+    {'trigger': {'type': '前队毁灭', 'value': 3},
+     'members': [{'type': 'speedy', 'pos': (100, 500), 'angle': 0},
+                 {'type': 'speedy', 'pos': (900, 500), 'angle': 180}]},
+    {'trigger': {'type': '前队毁灭或等待', 'value': 10},
+     'members': [{'type': 'heavy', 'pos': (500, 100), 'angle': 90},
+                 {'type': 'dogfighter', 'pos': (200, 800), 'angle': -45},
+                 {'type': 'dogfighter', 'pos': (800, 800), 'angle': -135}]},
+    {'trigger': {'type': '前队毁灭', 'value': 5},
+     'members': [{'type': 'attacker', 'pos': (100, 400), 'angle': 20},
+                 {'type': 'bomber', 'pos': (500, 50), 'angle': 90}]}
+]
+
+def draw_boundary():
+    color = (200, 0, 0)
+    for x in range(NONE_FLY_ZONE, SCREEN_WIDTH - NONE_FLY_ZONE, 12):
+        pygame.draw.line(screen, color, (x, NONE_FLY_ZONE), (x + 6, NONE_FLY_ZONE), 2)
+        pygame.draw.line(screen, color, (x, SCREEN_HEIGHT - NONE_FLY_ZONE), (x + 6, SCREEN_HEIGHT - NONE_FLY_ZONE), 2)
+    for y in range(NONE_FLY_ZONE, SCREEN_HEIGHT - NONE_FLY_ZONE, 12):
+        pygame.draw.line(screen, color, (NONE_FLY_ZONE, y), (NONE_FLY_ZONE, y + 6), 2)
+        pygame.draw.line(screen, color, (SCREEN_WIDTH - NONE_FLY_ZONE, y), (SCREEN_WIDTH - NONE_FLY_ZONE, y + 6), 2)
+
+def main():
+    global selected_type_index
+    clock = pygame.time.Clock()
+    base = Base(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2)
+    towers = []
+    enemies = []
+    bullets = []
+    missiles = []
+    wave_manager = WaveManager(anemy_r)
+
+    running = True
+    while running:
+        capslock_on = bool(pygame.key.get_mods() & pygame.KMOD_CAPS)
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_TAB:
+                    selected_type_index = (selected_type_index + 1) % len(TYPE_KEYS)
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                mx, my = pygame.mouse.get_pos()
+                chosen_type = TYPE_KEYS[selected_type_index]
+                if event.button == 1:
+                    enemies.append(Aircraft(mx, my, random.randint(-180, 180), chosen_type, team='player', color_override=GREEN))
+                elif event.button == 3:
+                    enemies.append(Aircraft(mx, my, random.randint(-180, 180), chosen_type, team='enemy', color_override=RED))
+                elif event.button == 2:
+                    towers.append(AATower(mx, my))
+
+        wave_manager.update(enemies)
+
+        # 所有飞机列表（用于导弹实时追踪）
+        all_aircraft = enemies  # 所有飞机
+
+        for b in bullets[:]:
+            b.update(enemies)
+            if not b.alive:
+                bullets.remove(b)
+        for m in missiles[:]:
+            m.update(all_aircraft)   # 传入所有飞机
+            if not m.alive:
+                missiles.remove(m)
+        for e in enemies:
+            e.update(enemies, base, towers, bullets, missiles, all_aircraft)
+        for t in towers:
+            t.update(enemies)
+
+        enemies = [e for e in enemies if e.alive]
+        towers = [t for t in towers if t.alive]
+
+        if not base.alive:
+            game_over_font = pygame.font.Font(None, 74)
+            screen.blit(game_over_font.render("基地被摧毁", True, RED),
+                        (SCREEN_WIDTH//2 - 200, SCREEN_HEIGHT//2 - 30))
+            pygame.display.flip()
+            pygame.time.wait(3000)
+            running = False
+
+        screen.fill(WHITE)
+        draw_boundary()
+        base.draw()
+        for t in towers:
+            t.draw()
+        for e in enemies:
+            e.draw()
+        for b in bullets:
+            b.draw()
+        for m in missiles:
+            m.draw()
+
+        if capslock_on:
+            for e in enemies:
+                e.draw_indicator()
+
+        current_key = TYPE_KEYS[selected_type_index]
+        current_cn = TYPE_NAMES_CN.get(current_key, current_key)
+        screen.blit(font.render(f"当前: {current_cn} (Tab切换)", True, (0,0,0)), (10, 10))
+        wave_info = f"波次: {wave_manager.current_wave_index+1}/{len(anemy_r)}  状态: {wave_manager.state}"
+        screen.blit(font.render(wave_info, True, (0,0,0)), (10, 35))
+
+        pygame.display.flip()
+        clock.tick(60)
+
+    pygame.quit()
+    sys.exit()
+
+if __name__ == "__main__":
+    main()
